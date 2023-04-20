@@ -1,6 +1,7 @@
 package uk.ac.bris.cs.scotlandyard.model;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import javax.annotation.Nonnull;
 import java.util.*;
@@ -11,8 +12,8 @@ import uk.ac.bris.cs.scotlandyard.model.ScotlandYard.*;
 
 import static uk.ac.bris.cs.scotlandyard.model.Piece.Detective.*;
 import static uk.ac.bris.cs.scotlandyard.model.Piece.MrX.MRX;
-import static uk.ac.bris.cs.scotlandyard.model.ScotlandYard.ALL_PIECES;
-import static uk.ac.bris.cs.scotlandyard.model.ScotlandYard.DETECTIVES;
+import static uk.ac.bris.cs.scotlandyard.model.ScotlandYard.*;
+import static uk.ac.bris.cs.scotlandyard.model.ScotlandYard.Ticket.*;
 
 /**
  * cw-model
@@ -27,64 +28,76 @@ public final class MyGameStateFactory implements Factory<GameState> {
 	private List<Player> detectives;
 
 	private final class MyGameState implements GameState {
-		private GameSetup setup;
-		private ImmutableSet<Piece> remaining;
-		private ImmutableList<LogEntry> log;
-		private Player mrX;
+		private final GameSetup setup;
+		private final ImmutableSet<Piece> remaining;
+		private final ImmutableList<LogEntry> log;
+		private final Player mrX;
 		public List<Player> detectives;
 		private ImmutableSet<Move> moves;
-		private ImmutableSet<Piece> winner;
+		private final ImmutableSet<Piece> winner;
+
+		private class TicketBoard implements Board.TicketBoard {
+			ImmutableMap<Ticket, Integer> tickets;
+			Piece piece;
+			Ticket ticket;
+
+			public TicketBoard(Piece piece) {
+				this.piece = Objects.requireNonNull(piece);
+				if (piece.isDetective()) {
+					for (int i = 0; i < detectives.size(); i++) {
+						if (detectives.get(i).piece().equals(piece)) {
+							tickets = detectives.get(i).tickets();
+						}
+					}
+				} else tickets = mrX.tickets();
+
+			}
+
+			public int getCount(Ticket ticket) {
+				return tickets.get(ticket);
+			}
+		}
 
 
 		@Override
 		public GameSetup getSetup() {
-			return setup;
-		}
+			return setup; }
 
 		@Override
 		public ImmutableSet<Piece> getPlayers() {
+//			Set<Piece> players = new HashSet<Piece>();
+//			players.add(mrX.piece());
+//			for (int i = 0; i<detectives.size(); i++) {
+//				players.add(detectives.get(i).piece());
+//			}
+//			return ImmutableSet.copyOf(players);
 			return ImmutableSet.of();
 		}
 
-		/*@Override
+		@Override
 		public Optional<Integer> getDetectiveLocation(Piece.Detective detective) {
 
-			return null;
-		};*/
-
-		@Override
-		public Optional<TicketBoard> getPlayerTickets(Piece piece) {
-			if(mrX.piece().equals(piece)){
-				//return Optional.of(mrX.tickets());
-			}
-			for(int i=0; i<detectives.size(); i++){
-				if(detectives.get(i).piece().equals(piece)){
-					//return Optional.of(detectives.get(i).tickets());
+			for (Player player : detectives) {
+				if (player.piece().equals(detective)) {
+					return Optional.of(player.location());
 				}
 			}
 			return Optional.empty();
+			}
+
+		@Override
+		public Optional<Board.TicketBoard> getPlayerTickets(Piece piece) {
+			//if piece exists
+			TicketBoard board = new TicketBoard(piece);
+			if (board.getCount(TAXI) + board.getCount(BUS) + board.getCount(UNDERGROUND) == 0) {
+				return Optional.empty();
+			} else return Optional.of(board);
+			//else return Optional.empty();
 		}
 
-		/*@Override
+		@Override
 		public ImmutableList<LogEntry> getMrXTravelLog() {
-			return ImmutableList.of();
-		}*/
-
-		@Override
-		public ImmutableList<LogEntry> getMrXTravelLog(){
 			return log;
-		}
-
-		@Override
-		public Optional<Integer> getDetectiveLocation(Detective detective){
-			// For all detectives, if Detective#piece == detective, then return the location in an Optional.of();
-			// otherwise, return Optional.empty();
-			for(int i=0; i<detectives.size(); i++){
-				if(detectives.get(i).piece().equals(detective)){
-					return Optional.of(detectives.get(i).location());
-				}
-			}
-			return Optional.empty();
 		}
 
 		@Override
@@ -96,6 +109,7 @@ public final class MyGameStateFactory implements Factory<GameState> {
 		@Override
 		public ImmutableSet<Move> getAvailableMoves() {
 			//requires us to find ALL moves Players can make for a given game state
+
 			return moves;
 		}
 
@@ -103,6 +117,7 @@ public final class MyGameStateFactory implements Factory<GameState> {
 		public GameState advance(Move move) {
 			return null;
 		}
+
 
 		private MyGameState(final GameSetup setup,
 							final ImmutableSet<Piece> remaining,
@@ -114,7 +129,8 @@ public final class MyGameStateFactory implements Factory<GameState> {
 			//CHECK DETECTIVES ARE ALL DETECTIVES
 			//CHECK MRX IS BLACK
 			//NO DUPLICATE GAME PIECES
-			//
+			//detectives having secret or double tickets should throw
+			//no detective location overlap
 
 			if (setup == null) {
 				throw new NullPointerException("setup can't be null");
@@ -129,9 +145,9 @@ public final class MyGameStateFactory implements Factory<GameState> {
 			if (mrX == null) { //passed
 				throw new NullPointerException("mrX can't be null");
 			}
-			/*if (!(getPlayers().contains(MRX))) { //passed
-				throw new IllegalArgumentException("no mr x");
-			}*/
+//			if (!(getPlayers().contains(MRX))) { //passed
+//				throw new IllegalArgumentException("no mr x");
+//			}
 
 			if (Collections.frequency(getPlayers(), MRX) > 1) { //passed
 				throw new IllegalArgumentException("more than one MRX");
@@ -145,13 +161,10 @@ public final class MyGameStateFactory implements Factory<GameState> {
 //				throw new NullPointerException("no detectives");
 //			}
 
-			if (detectives == null){
-				throw new NullPointerException("detectives can't be null");
-			}
-
 			if (detectives.isEmpty() || (detectives.contains(null))) { //passed
 				throw new NullPointerException("detectives can't be empty or null");
 			}
+
 
 			this.setup = setup;
 			this.remaining = remaining;
@@ -167,6 +180,9 @@ public final class MyGameStateFactory implements Factory<GameState> {
 			Player mrX,
 			ImmutableList<Player> detectives) {
 		// TODO
+		//remaining is only mrX at beginning
+		//log empty at beginning
+		//detectives empty at beginning
 
 		return new MyGameState(setup, ImmutableSet.of(MRX), ImmutableList.of(), mrX, detectives);
 
