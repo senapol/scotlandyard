@@ -39,7 +39,6 @@ public final class MyGameStateFactory implements Factory<GameState> {
 		private class TicketBoard implements Board.TicketBoard {
 			ImmutableMap<Ticket, Integer> tickets;
 			Piece piece;
-			Ticket ticket;
 
 			public TicketBoard(Piece piece) {
 				this.piece = Objects.requireNonNull(piece);
@@ -106,11 +105,96 @@ public final class MyGameStateFactory implements Factory<GameState> {
 			return ImmutableSet.of();
 		}
 
+		//calculate possible single moves
+		private static Set<Move.SingleMove> makeSingleMoves(GameSetup setup, List<Player> detectives, Player player, int source){
+
+			// TODO create an empty collection of some sort, say, HashSet, to store all the SingleMove we generate
+			Set<Move.SingleMove> moves = new HashSet<>();
+			for(int destination : setup.graph.adjacentNodes(source)) {
+				// TODO find out if destination is occupied by a detective
+				//  if the location is occupied, don't add to the collection of moves to return
+				boolean free = true;
+				for(Player det : detectives){
+					if(destination == det.location()){
+						free = false;
+					}
+				}
+				if(free) {
+					for (Transport t : setup.graph.edgeValueOrDefault(source, destination, ImmutableSet.of())) {
+						// TODO find out if the player has the required tickets
+						//  if it does, construct a SingleMove and add it the collection of moves to return
+						if(player.tickets().get(t)>0){
+							moves.add(new Move.SingleMove(player.piece(), source, t.requiredTicket(), destination));
+						}
+					}
+				}
+
+				// TODO consider the rules of secret moves here
+				//  add moves to the destination via a secret ticket if there are any left with the player
+				if(player.tickets().get(SECRET)>0){
+					moves.add(new Move.SingleMove(player.piece(), source, SECRET, destination));
+				}
+			}
+
+			// TODO return the collection of moves
+			return moves;
+		}
+
+		private static Set<Move.DoubleMove> makeDoubleMoves(GameSetup setup, List<Player> detectives, Player player, int source, Set<Move.SingleMove> singleMoves){
+
+			Set<Move.DoubleMove> moves = new HashSet<>();
+			//iterating for each possible single move
+			for (Move.SingleMove sMove : singleMoves) {
+				for (int destination : setup.graph.adjacentNodes(sMove.destination)) {
+					//checking if destination is occupied
+					boolean free = true;
+					for (Player det : detectives) {
+						if (destination == det.location()) {
+							free = false;
+						}
+					}
+					if (free) {
+						for (Transport t : setup.graph.edgeValueOrDefault(source, destination, ImmutableSet.of())) {
+							//checking if mrx has the required tickets for both moves
+							if (player.tickets().get(t) == player.tickets().get(sMove.ticket) && player.tickets().get(t)>1 || player.tickets().get(t) > 0 && player.tickets().get(sMove.ticket)>0) {
+								moves.add(new Move.DoubleMove(player.piece(), source, sMove.ticket, sMove.destination, t.requiredTicket(), destination));
+							}
+							//adding single secret ticket combinations
+							if(player.tickets().get(sMove.ticket)>0){
+								moves.add(new Move.DoubleMove(player.piece(), source, sMove.ticket, sMove.destination, SECRET, destination));
+							}if(player.tickets().get(t)>0){
+								moves.add(new Move.DoubleMove(player.piece(), source, SECRET, sMove.destination, t.requiredTicket(), destination));
+							}
+						}
+					}
+
+					//adding double secret tickets
+					if (player.tickets().get(SECRET) > 1) {
+						moves.add(new Move.DoubleMove(player.piece(), source, SECRET, sMove.destination, SECRET, destination));
+					}
+				}
+			}
+
+			return moves;
+		}
+
+
+
 		@Override
 		public ImmutableSet<Move> getAvailableMoves() {
 			//requires us to find ALL moves Players can make for a given game state
+			Set<Move> moves = new HashSet<>();
 
-			return moves;
+			//detective moves
+			for(Player det : detectives){
+				moves.addAll(makeSingleMoves(setup, detectives, det, det.location()));
+			}
+
+			//mrx moves
+			Set<Move.SingleMove> mrXSingle = makeSingleMoves(setup, detectives, mrX, mrX.location());
+			moves.addAll(mrXSingle);
+			moves.addAll(makeDoubleMoves(setup, detectives, mrX, mrX.location(), mrXSingle));
+			return ImmutableSet.copyOf(moves);
 		}
 
 		@Override
