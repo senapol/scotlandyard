@@ -5,6 +5,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import javax.annotation.Nonnull;
 import java.util.*;
+import com.google.common.collect.Lists;
 import uk.ac.bris.cs.scotlandyard.model.Board.GameState;
 import uk.ac.bris.cs.scotlandyard.model.Move;
 import uk.ac.bris.cs.scotlandyard.model.Piece;
@@ -56,7 +57,6 @@ public final class MyGameStateFactory implements Factory<GameState> {
 				return tickets.get(ticket);
 			}
 		}
-
 
 		@Override
 		public GameSetup getSetup() {
@@ -120,10 +120,10 @@ public final class MyGameStateFactory implements Factory<GameState> {
 					}
 				}
 				if(free) {
-					for (Transport t : setup.graph.edgeValueOrDefault(source, destination, ImmutableSet.of())) {
+					for (Transport t : Objects.requireNonNull(setup.graph.edgeValueOrDefault(source, destination, ImmutableSet.of()))) {
 						// TODO find out if the player has the required tickets
 						//  if it does, construct a SingleMove and add it the collection of moves to return
-						if(player.tickets().get(t)>0){
+						if(t != Transport.FERRY && player.tickets().get(t.requiredTicket())>0){
 							moves.add(new Move.SingleMove(player.piece(), source, t.requiredTicket(), destination));
 						}
 					}
@@ -156,13 +156,13 @@ public final class MyGameStateFactory implements Factory<GameState> {
 					if (free) {
 						for (Transport t : setup.graph.edgeValueOrDefault(source, destination, ImmutableSet.of())) {
 							//checking if mrx has the required tickets for both moves
-							if (player.tickets().get(t) == player.tickets().get(sMove.ticket) && player.tickets().get(t)>1 || player.tickets().get(t) > 0 && player.tickets().get(sMove.ticket)>0) {
+							if (t != Transport.FERRY && (player.tickets().get(t.requiredTicket()) == player.tickets().get(sMove.ticket) && player.tickets().get(t.requiredTicket())>1 || player.tickets().get(t.requiredTicket()) != player.tickets().get(sMove.ticket)&&player.tickets().get(t.requiredTicket()) > 0 && player.tickets().get(sMove.ticket)>0)) {
 								moves.add(new Move.DoubleMove(player.piece(), source, sMove.ticket, sMove.destination, t.requiredTicket(), destination));
 							}
 							//adding single secret ticket combinations
-							if(player.tickets().get(sMove.ticket)>0){
+							if(player.tickets().get(sMove.ticket)>0 && player.tickets().get(SECRET) > 0){
 								moves.add(new Move.DoubleMove(player.piece(), source, sMove.ticket, sMove.destination, SECRET, destination));
-							}if(player.tickets().get(t)>0){
+							}if(player.tickets().get(t.requiredTicket())>0 && player.tickets().get(SECRET) > 0){
 								moves.add(new Move.DoubleMove(player.piece(), source, SECRET, sMove.destination, t.requiredTicket(), destination));
 							}
 						}
@@ -186,20 +186,90 @@ public final class MyGameStateFactory implements Factory<GameState> {
 			Set<Move> moves = new HashSet<>();
 
 			//detective moves
-			for(Player det : detectives){
-				moves.addAll(makeSingleMoves(setup, detectives, det, det.location()));
+			if(remaining.equals(mrX.piece())){
+				Set<Move.SingleMove> mrXSingle = makeSingleMoves(setup, detectives, mrX, mrX.location());
+				moves.addAll(mrXSingle);
+				moves.addAll(makeDoubleMoves(setup, detectives, mrX, mrX.location(), mrXSingle));
+			}else {
+				for (Player det : detectives) {
+					if(remaining.contains(det.piece())) {
+						moves.addAll(makeSingleMoves(setup, detectives, det, det.location()));
+					}
+				}
 			}
 
-			//mrx moves
-			Set<Move.SingleMove> mrXSingle = makeSingleMoves(setup, detectives, mrX, mrX.location());
-			moves.addAll(mrXSingle);
-			moves.addAll(makeDoubleMoves(setup, detectives, mrX, mrX.location(), mrXSingle));
 			return ImmutableSet.copyOf(moves);
 		}
 
 		@Override
 		public GameState advance(Move move) {
-			return null;
+			this.moves = getAvailableMoves();
+			//if(!moves.contains(move)) throw new IllegalArgumentException("Illegal move: "+move);
+
+			return move.accept(new Move.Visitor<GameState>() {
+				@Override
+				public GameState visit(Move.SingleMove move) {
+					Player mrXUpdate = mrX;
+					Set<Piece> remainingUpdate = new HashSet<>();
+
+					if(move.commencedBy().isMrX()){
+						List<LogEntry> logUpdate = new ArrayList<>();
+						logUpdate.addAll(log);
+
+						for(Player det : detectives){
+							remainingUpdate.add(det.piece());
+						}
+						mrXUpdate= mrXUpdate.at(move.destination);
+						if(setup.moves.get(logUpdate.size())){
+							logUpdate.add(LogEntry.reveal(move.ticket, move.destination));
+						}else{
+							logUpdate.add(LogEntry.hidden(move.ticket));
+						}
+						mrXUpdate = mrXUpdate.use(move.ticket);
+
+						return new MyGameState(setup, ImmutableSet.copyOf(remainingUpdate), ImmutableList.copyOf(logUpdate), mrXUpdate, detectives);
+					}
+					if(move.commencedBy().isDetective()){
+						List<Player> detectivesUpdate = new ArrayList<>();
+						Player detUpdate = null;
+
+						for(Player det : detectives){
+							if(det.piece().webColour().equals(move.commencedBy().webColour())){
+								detUpdate = det;
+							}else{
+								detectivesUpdate.add(det);
+							}
+						}
+						for (Player det : detectives) {
+							if (remaining.contains(det) && !detUpdate.equals(det)) {
+								remainingUpdate.add(det.piece());
+							}
+						}
+						if(remaining.isEmpty()){
+							remainingUpdate.add(mrX.piece());
+						}
+
+						detUpdate = detUpdate.use(move.ticket);
+						mrXUpdate = mrXUpdate.give(move.ticket);
+						detUpdate = detUpdate.at(move.destination);
+						detectivesUpdate.add(detUpdate);
+						return new MyGameState(setup, ImmutableSet.copyOf(remainingUpdate), log, mrXUpdate, detectivesUpdate);
+					}
+					return null;
+
+				}
+
+				@Override
+				public GameState visit(Move.DoubleMove move) {
+					if(move.commencedBy().isMrX()){
+
+					}
+					if(move.commencedBy().isDetective()){
+
+					}
+					return new MyGameState(setup, remaining, log, mrX, detectives);
+				}
+			});
 		}
 
 
@@ -246,6 +316,10 @@ public final class MyGameStateFactory implements Factory<GameState> {
 
 			if (detectives.isEmpty() || (detectives.contains(null))) { //passed
 				throw new NullPointerException("detectives can't be empty or null");
+			}
+
+			if (setup.graph.nodes().isEmpty()) {
+				throw new IllegalArgumentException("graph empty");
 			}
 
 			// detectives have secret ticket
